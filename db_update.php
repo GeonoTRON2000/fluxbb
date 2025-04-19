@@ -1769,10 +1769,12 @@ foreach ($errors[$id] as $cur_error)
 
 			if (strlen($old_password) == 32) // MD5 from 1.2
 				$new_password_hash = '#MD5#'.flux_password_hash($old_password);
-			else if ($remove_salt) // Salted SHA1 from 1.3
-				$new_password_hash = '#SHA1-S#'.$cur_user['salt'].'#'.flux_password_hash($old_password);
-			else if (strlen($old_password) == 40) // Unsalted SHA1 from 1.4
-				$new_password_hash = '#SHA1#'.flux_password_hash($old_password);
+			else if (strlen($old_password) == 40) {
+				if ($remove_salt) // Salted SHA1 from 1.3
+					$new_password_hash = '#SHA1-S#'.$cur_user['salt'].'#'.flux_password_hash($old_password);
+				else // Unsalted SHA1 from 1.4
+					$new_password_hash = '#SHA1#'.flux_password_hash($old_password);
+			}
 			else
 				$new_password_hash = $old_password;
 

@@ -168,6 +168,8 @@ else
 
 	if (pun_strlen($password1) < 9)
 		$alerts[] = $lang_install['Short password'];
+	else if (strlen($password1) > 1024)
+		$alerts[] = $lang_install['Long password'];
 	else if ($password1 != $password2)
 		$alerts[] = $lang_install['Passwords not match'];
 
@@ -529,9 +531,11 @@ else
 
 
 	// Make sure FluxBB isn't already installed
-	$result = $db->query('SELECT 1 FROM '.$db_prefix.'users WHERE id=1');
-	if ($db->has_rows($result))
-		error(sprintf($lang_install['Existing table error'], $db_prefix, $db_name));
+	try {
+		$result = $db->query('SELECT 1 FROM '.$db_prefix.'users WHERE id=1');
+		if ($db->has_rows($result))
+			error(sprintf($lang_install['Existing table error'], $db_prefix, $db_name));
+	} catch (Throwable) {}
 
 	// Check if InnoDB is available
 	if ($db_type == 'mysqli_innodb')

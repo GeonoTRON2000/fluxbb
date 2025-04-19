@@ -95,6 +95,8 @@ if (isset($_POST['form_sent']))
 
 	if (pun_strlen($password1) < 9)
 		$errors[] = $lang_prof_reg['Pass too short'];
+	else if (strlen($password1) > 1024)
+		$errors[] = $lang_prof_reg['Pass too long'];
 	else if ($password1 != $password2)
 		$errors[] = $lang_prof_reg['Pass not match'];
 

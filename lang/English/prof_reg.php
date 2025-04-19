@@ -28,6 +28,7 @@ $lang_prof_reg = array(
 'Username BBCode'			=>	'Usernames may not contain any of the text formatting tags (BBCode) that the forum uses. Please choose another username.',
 'Banned username'			=>	'The username you entered is banned in this forum. Please choose another username.',
 'Pass too short'			=>	'Passwords must be at least 9 characters long. Please choose another (longer) password.',
+'Pass too long'       =>  'Passwords must be under 1024 bytes. Please choose another (shorter) password.',
 'Pass not match'			=>	'Passwords do not match.',
 'Banned email'				=>	'The email address you entered is banned in this forum. Please choose another email address.',
 'Dupe email'				=>	'Someone else is already registered with that email address. Please choose another email address.',
