@@ -1122,7 +1122,7 @@ function flux_password_hash($pass)
 {
 	global $password_hash_cost;
 
-	assert(strlen($pass) < FORUM_MAX_PASSWORD_SIZE);
+	assert(strlen($pass) <= 1024);
 	return password_hash($pass, PASSWORD_DEFAULT, array('cost' => $password_hash_cost));
 }
 
@@ -1135,7 +1135,7 @@ function flux_password_hash($pass)
 //
 function flux_password_verify($pass, $hash)
 {
-	if (strlen($pass) > FORUM_MAX_PASSWORD_SIZE)
+	if (strlen($pass) > 1024)
 		return false;
 
 	if ($hash[0] == '#')

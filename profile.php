@@ -90,10 +90,10 @@ if ($action == 'change_pass')
 
 		if ($new_password1 != $new_password2)
 			message($lang_prof_reg['Pass not match']);
-		if (strlen($new_password1) > FORUM_MAX_PASSWORD_SIZE)
-			message($lang_prof_reg['Pass too long']);
 		if (pun_strlen($new_password1) < 9)
 			message($lang_prof_reg['Pass too short']);
+		if (strlen($new_password1) > 1024)
+			message($lang_prof_reg['Pass too long']);
 
 		$result = $db->query('SELECT * FROM '.$db->prefix.'users WHERE id='.$id) or error('Unable to fetch password', __FILE__, __LINE__, $db->error());
 		$cur_user = $db->fetch_assoc($result);
