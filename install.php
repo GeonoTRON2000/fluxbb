@@ -168,6 +168,8 @@ else
 
 	if (pun_strlen($password1) < 9)
 		$alerts[] = $lang_install['Short password'];
+	else if (strlen($password1) > FORUM_MAX_PASSWORD_SIZE)
+		$alerts[] = $lang_install['Long password'];
 	else if ($password1 != $password2)
 		$alerts[] = $lang_install['Passwords not match'];
 

@@ -1122,6 +1122,7 @@ function flux_password_hash($pass)
 {
 	global $password_hash_cost;
 
+	assert(strlen($pass) < FORUM_MAX_PASSWORD_SIZE);
 	return password_hash($pass, PASSWORD_DEFAULT, array('cost' => $password_hash_cost));
 }
 
@@ -1134,6 +1135,9 @@ function flux_password_hash($pass)
 //
 function flux_password_verify($pass, $hash)
 {
+	if (strlen($pass) > FORUM_MAX_PASSWORD_SIZE)
+		return false;
+
 	if ($hash[0] == '#')
 	{
 		// MD5 from 1.2

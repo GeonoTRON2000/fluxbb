@@ -90,6 +90,8 @@ if ($action == 'change_pass')
 
 		if ($new_password1 != $new_password2)
 			message($lang_prof_reg['Pass not match']);
+		if (strlen($new_password1) > FORUM_MAX_PASSWORD_SIZE)
+			message($lang_prof_reg['Pass too long']);
 		if (pun_strlen($new_password1) < 9)
 			message($lang_prof_reg['Pass too short']);
 

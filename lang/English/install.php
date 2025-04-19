@@ -19,6 +19,7 @@ $lang_install = array(
 'Username 5'					=>	'Usernames may not contain all the characters \', " and [ or ] at once.',
 'Username 6'					=>	'Usernames may not contain any of the text formatting tags (BBCode) that the forum uses.',
 'Short password'				=>	'Passwords must be at least 9 characters long.',
+'Long password'       =>  'Passwords must be at most 1024 bytes long.',
 'Passwords not match'			=>	'Passwords do not match.',
 'Wrong email'					=>	'The administrator email address you entered is invalid.',
 'No board title'				=>	'You must enter a board title.',
