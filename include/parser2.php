@@ -7,6 +7,7 @@
  */
 
  // Make sure no one attempts to run this script "directly"
+// TODO: re-enable
 //if (!defined('PUN'))
 //    exit;
 
@@ -99,11 +100,16 @@ class BBCodeParser {
         else
             self::$chars = pun_trim($text);
 
+        if ($pun_config['p_message_bbcode'] !== '1'
+                || strpos(self::$chars, '[') === false || strpos(self::$chars, ']') === false)
+            return array(new SyntaxTreeTextNode(self::$chars));
+
         self::$i = 0;
         self::$limit = strlen(self::$chars);
         self::$string_buffer = array();
 
-        $tree = self::parse_text($errors);
+        $tree = array();
+        self::parse_text($tree, $errors);
         return empty($errors) ? $tree : array();
     }
 
@@ -179,56 +185,57 @@ class BBCodeParser {
     private static function generate_url_tag(&$tag, &$node) {
         $custom_url = !is_null($node->attribute);
         // can either be [url]text[/url] or [url][img]link[/img][/url]
-        list($url, $inner) =
-            self::extract_url_interior($node->children, $custom_url);
-        if (empty($inner))
+        // note: but not a [user][img]7[/img][/user]
+        list($inner_text, $inner) = self::extract_url_interior($node, $custom_url);
+        if (empty($inner_text))
+            // TODO: throw in validations, remove empty generation
             return '';
 
-        $url = $custom_url ? pun_trim($node->attribute) : $url;
+        $url = $custom_url ? pun_trim($node->attribute) : $inner_text;
         switch ($tag) {
             case 'topic':
                 $url = get_base_url(true) . '/viewtopic.php?id=' . intval($url);
-                $inner = $custom_url ? $inner : pun_htmlspecialchars($url);
                 break;
             case 'post':
                 $i_url = intval($url);
                 $url = get_base_url(true) . '/viewtopic.php?pid=' . $i_url . '#p' . $i_url;
-                $inner = $custom_url ? $inner : pun_htmlspecialchars($url);
                 break;
             case 'forum':
                 $url = get_base_url(true) . '/viewforum.php?id=' . intval($url);
-                $inner = $custom_url ? $inner : pun_htmlspecialchars($url);
                 break;
             case 'user':
                 $url = get_base_url(true) . '/profile.php?id=' . intval($url);
-                $inner = $custom_url ? $inner : pun_htmlspecialchars($url);
-                break;
-            case 'email':
-                $url = 'mailto:' . $url;
                 break;
         }
 
-        $url = self::prepend_protocol($url);
+        $inner = is_null($inner) ? self::safe_truncate_url($url) : $inner;
+        $url = self::prepend_protocol($url, $tag);
         return '<a href="' . pun_htmlspecialchars($url). '" rel="nofollow">'
                     . $inner . '</a>';
     }
 
-    private static function extract_url_interior(&$tree, $custom_url) {
-        if (empty($tree))
+    private static function safe_truncate_url($url) {
+        return pun_htmlspecialchars(
+            utf8_strlen($url) > 55
+                ? utf8_substr($url, 0 , 39) . ' … ' . utf8_substr($url, -10)
+                : $url);
+    }
+
+    private static function extract_url_interior(&$node, $custom_url) {
+        if (empty($node->children))
             return array('', '');
         // TODO: if count($tree) > 1 throw
 
-        if ($tree[0] instanceof SyntaxTreeTextNode) {
-            $url = pun_trim($tree[0]->text);
-            $unsafe_interior = (!$custom_url && utf8_strlen($url) > 55)
-                ? utf8_substr($url, 0 , 39) . ' … ' . utf8_substr($url, -10)
-                : $url;
-            return array($url, pun_htmlspecialchars($unsafe_interior));
-        } else if (($tree[0] instanceof SyntaxTreeTagNode)
-                    && strcasecmp($tree[0]->tag, 'img') === 0) {
+        $child = $node->children[0];
+        if ($child instanceof SyntaxTreeTextNode) {
             return array(
-                pun_trim(self::node_interior_as_text($tree[0])),
-                self::generate_img_tag($tree[0]));
+                pun_trim($child->text),
+                $custom_url ? self::generate_text($child) : null);
+        } else if (($child instanceof SyntaxTreeTagNode)
+                    && strcasecmp($child->tag, 'img') === 0) {
+            return array(
+                pun_trim(self::node_interior_as_text($child)),
+                self::generate_img_tag($child));
         }
         // TODO: else throw
     }
@@ -351,9 +358,11 @@ class BBCodeParser {
         return $node->children[0]->text;
     }
 
-    private static function prepend_protocol($url) {
+    private static function prepend_protocol($url, $tag = 'url') {
         $full_url = str_replace(array(' ', '\'', '`', '"'), array('%20', '', '', ''), $url);
-        if (strpos($url, 'www.') === 0) // If it starts with www, we add http://
+        if ($tag === 'email')
+            $full_url = 'mailto:'.$full_url;
+        else if (strpos($url, 'www.') === 0) // If it starts with www, we add http://
             $full_url = 'http://'.$full_url;
         else if (strpos($url, 'ftp.') === 0) // Else if it starts with ftp, we add ftp://
             $full_url = 'ftp://'.$full_url;
@@ -361,7 +370,7 @@ class BBCodeParser {
             $full_url = get_current_protocol().':'.$full_url;
         else if (strpos($url, '/') === 0) // Allow for host relative URLs that start with a slash
             $full_url = get_base_url(true).$full_url;
-        else if (!preg_match('#^([a-z0-9]{3,6}):(//)?#', $url)) // Else if it doesn't start with abcdef://, we add http://
+        else if (!preg_match('#^([a-z0-9]{3,6})://#', $url)) // Else if it doesn't start with abcdef://, we add http://
             $full_url = 'http://'.$full_url;
 
         return $full_url;
@@ -400,8 +409,7 @@ class BBCodeParser {
         return substr($text, 1, -1);
     }
 
-    private static function parse_text(&$errors, $context = null) {
-        $tree = array();
+    private static function parse_text(&$tree, &$errors, $context = null) {
         $close_tag = is_null($context) ? null : '[/' . $context . ']';
         // text within [code] should not be touched
         $preformatted_context = !is_null($context) && strcasecmp($context, 'code') === 0;
@@ -411,11 +419,10 @@ class BBCodeParser {
             if ($char === '[' && self::$i + 2 < self::$limit) {
                 if (!$preformatted_context && self::$chars[self::$i + 1] !== '/') {
                     self::dump_string_buffer($tree);
-                    $tree[] = self::parse_tag($errors);
+                    self::parse_tag($tree, $errors, $context);
                     continue;
                 } else if (!is_null($context) && self::matches_close_tag($close_tag)) {
-                    self::dump_string_buffer($tree);
-                    return $tree;
+                    return self::dump_string_buffer($tree);
                 }
             }
             self::$string_buffer[] = $char;
@@ -425,11 +432,9 @@ class BBCodeParser {
 
         if (!is_null($context))
             $errors[] = 'missing close tag: ' . $close_tag;
-
-        return $tree;
     }
 
-    private static function parse_tag(&$errors) {
+    private static function parse_tag(&$tree, &$errors, $context) {
         // consume [
         self::$i++;
 
@@ -442,25 +447,28 @@ class BBCodeParser {
         // refund before attempting to parse the attribute
         if (self::$i >= self::$limit
             || !self::is_valid_tag($tag, ($has_attr = self::$chars[self::$i] === '=')))
-            return new SyntaxTreeTextNode('[' . $tag);
+            return self::dump_string($tree, '[' . $tag);
 
         // if the attribute value is invalid, refund
         $attr = $has_attr ? self::parse_attr($errors) : null;
         if ($has_attr && !self::is_valid_attr($tag, $attr))
-            return new SyntaxTreeTextNode('[' . $tag . '=' . $attr);
+            return self::dump_string($tree, '[' . $tag . '=' . $attr);
 
         // must find ] or else it's not actually a tag
         if (self::$i >= self::$limit || self::$chars[self::$i] !== ']')
-            return new SyntaxTreeTextNode('[' . $tag . ($has_attr ? '=' . $attr : ''));
+            return self::dump_string($tree, '[' . $tag . ($has_attr ? '=' . $attr : ''));
 
         // consume ]
         self::$i++;
 
-        $children = self::parse_text($errors, $tag);
+        $node = new SyntaxTreeTagNode($tag, $attr, array());
+        self::parse_text($node->children, $errors, $tag);
+        self::dump_node($tree, $node);
 
         // consume close tag (control will not return from `parse_text` unless it's found)
         self::$i += strlen($tag) + 3;
-        return new SyntaxTreeTagNode($tag, $attr, $children);
+
+        // TODO: validate tag nesting before surrendering control
     }
 
     private static function parse_attr(&$errors) {
@@ -515,21 +523,40 @@ class BBCodeParser {
         return $string;        
     }
 
+    private static function dump_node(&$tree, &$node) {
+        if ($node instanceof SyntaxTreeTextNode) {
+            if (empty($node->text))
+                return;
+
+            if (!empty($tree) && (($last = $tree[count($tree) - 1]) instanceof SyntaxTreeTextNode)) {
+                $last->text .= $node->text;
+                return;
+            }
+        }
+        // skip empty bbcode
+        else if (empty($node->children))
+            return;
+
+        $tree[] = $node;
+    }
+
+    private static function dump_string(&$tree, $string) {
+        $node = new SyntaxTreeTextNode($string);
+        self::dump_node($tree, $node);
+    }
+
     private static function dump_string_buffer(&$tree) {
         if (!empty(self::$string_buffer)) {
             $string = implode('', self::$string_buffer);
             self::$string_buffer = array();
-            
-            if (!empty($tree) && (($last = $tree[count($tree) - 1]) instanceof SyntaxTreeTextNode))
-                $last->text .= $string;
-            else
-                $tree[] = new SyntaxTreeTextNode($string);
+            self::dump_string($tree, $string);
         }
     }
 }
 
 // TODO: test script, delete
-$pun_config = ['o_smilies' => '1', 'o_make_links' => '0', 'o_censoring' => 0, 'o_base_url' => 'https://blast.thegt.org'];
+$pun_config = ['o_smilies' => '1', 'o_make_links' => '0', 'o_censoring' => '0',
+                'p_message_bbcode' => '1', 'o_base_url' => 'https://blast.thegt.org'];
 $pun_user = ['show_img' => '1', 'show_smilies' => '1'];
 $lang_common = ['wrote' => 'wrote:'];
 require('./utf8/utf8.php');
