@@ -60,6 +60,22 @@ class BBCodeParser {
         ':rolleyes:' => 'roll.png',
         ':cool:' => 'cool.png');
 
+    private static array $nesting_limits;
+    private static $block_tags = array('quote', 'code', 'list', 'h', '*');
+    private static $context_limit_bbcode = array(
+        '*' 	=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url',
+                            'email', 'list', 'img', 'code', 'topic', 'post', 'forum', 'user'),
+        'list' 	=> array('*'),
+        'url' 	=> array('img'),
+        'email' => array('img'),
+        'topic' => array('img'),
+        'post'  => array('img'),
+        'forum' => array('img'),
+        'user'  => array('img'),
+        'img' 	=> array(),
+        'h'		=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url',
+                            'email', 'topic', 'post', 'forum', 'user'));
+
     private static int $i;
     private static int $limit;
     private static int $mode;
@@ -99,6 +115,11 @@ class BBCodeParser {
                 || strpos(self::$chars, '[') === false || strpos(self::$chars, ']') === false)
             return array(new SyntaxTreeTextNode(self::$chars));
 
+        self::$nesting_limits = array(
+            'quote' => $pun_config['o_quote_depth'],
+            'list' => 5,
+            '*' => 5);
+
         self::$i = 0;
         self::$limit = strlen(self::$chars);
         self::$string_buffer = array();
@@ -120,7 +141,7 @@ class BBCodeParser {
         if ($node instanceof SyntaxTreeTextNode) {
             return self::generate_text($node);
         } else if ($node instanceof SyntaxTreeTagNode) {
-            switch ($tag = strtolower($node->tag)) {
+            switch ($tag = $node->tag) {
                 case 'img':
                     return self::generate_img_tag($node);
                 case 'c':
@@ -319,7 +340,8 @@ class BBCodeParser {
 
         $text = pun_htmlspecialchars($node->text);
 
-        if ($ctx_replace_links && $pun_config['o_make_links'] === '1')
+        if ($ctx_replace_links && $pun_config['o_make_links'] === '1'
+                && $pun_user['g_post_links'] === '1')
             $text = self::replace_links($text);
 
         if ($pun_config['o_smilies'] === '1'&& $pun_user['show_smilies'] === '1'
@@ -393,19 +415,60 @@ class BBCodeParser {
         return substr($text, 1, -1);
     }
 
-    private static function parse_text(&$tree, &$errors, $context = null, $depth = 0) {
-        $close_tag = is_null($context) ? null : '[/' . $context . ']';
+    // true = pass validations and render
+    // false = pass validations but do not render this tag
+    // append to $errors = fail validations
+    private static function validate_tag_rules(&$tag, &$errors, &$context) {
+        global $pun_user, $lang_common;
+        $depth = array_count_values($context);
+        $parent = empty($context) ? null : $context[count($context) - 1];
+
+        if (isset($depth[$tag]) && !isset(self::$nesting_limits[$tag]))
+            $errors[] = sprintf(
+                $lang_common['BBCode error invalid self-nesting'], $tag);
+        else if (isset($depth[$tag])
+                && $depth[$tag] >= self::$nesting_limits[$tag])
+            $errors[] = sprintf(
+                $lang_common['BBCode error nesting depth'],
+                $tag,
+                self::$nesting_limits[$tag]);
+        else if ($pun_user['g_post_links'] !== '1' && $tag === 'url')
+            $errors[] = $lang_common['BBCode error tag url not allowed'];
+        else if ($parent = self::invalid_tag_nesting($tag, $context))
+            $errors[] = sprintf(
+                $lang_common['BBCode error invalid nesting'], $tag, $parent);
+    }
+
+    private static function invalid_tag_nesting(&$tag, &$context) {
+        $block_tag = in_array($tag, self::$block_tags);
+        foreach ($context as $parent_tag) {
+            if (isset(self::$context_limit_bbcode[$parent_tag])
+                    && !in_array($tag, self::$context_limit_bbcode[$parent_tag]))
+                return $parent_tag;
+            if ($block_tag && !in_array($parent_tag, self::$block_tags))
+                return $parent_tag;
+        }
+        return false;
+    }
+
+    private static function parse_text(&$tree, &$errors, $context = array()) {
+        global $lang_common;
+
+        if (!empty($context)) {
+            $parent_tag = $context[count($context) - 1];
+            $close_tag = '[/' . $parent_tag . ']';
+        }
         // text within [code] should not be touched
-        $preformatted_context = !is_null($context) && strcasecmp($context, 'code') === 0;
+        $preformatted_context = !empty($context) && strcasecmp($parent_tag, 'code') === 0;
 
         while (self::$i < self::$limit) {
             $char = self::$chars[self::$i];
             if ($char === '[' && self::$i + 2 < self::$limit) {
                 if (!$preformatted_context && self::$chars[self::$i + 1] !== '/') {
                     self::dump_string_buffer($tree);
-                    self::parse_tag($tree, $errors, $context, $depth);
+                    self::parse_tag($tree, $errors, $context);
                     continue;
-                } else if (!is_null($context) && self::matches_close_tag($close_tag)) {
+                } else if (!empty($context) && self::matches_close_tag($close_tag)) {
                     return self::dump_string_buffer($tree);
                 }
             }
@@ -414,34 +477,12 @@ class BBCodeParser {
         }
         self::dump_string_buffer($tree);
 
-        if (!is_null($context))
-            $errors[] = 'missing close tag: ' . $close_tag;
+        if (!empty($context) && empty($errors))
+            $errors[] =
+                sprintf($lang_common['BBCode error no closing tag'], $parent_tag);
     }
 
-    private static function validate_tag_rules(&$node, &$errors, $context, $depth) {
-        global $pun_config;
-        // TODO: impl
-        // quotes can be nested up to $pun_config['o_quote_depth']
-        // lists and * can be nested up to 5 times
-        // block tags (quote, code, list, h, *) can only be nested in other block tags
-        // the following may not contain newlines:
-        // array('b', 'i', 'u', 's', 'ins', 'del', 'em', 'color', 'colour', 'h', 'topic', 'post', 'forum', 'user');
-        /* certain tags may only contain:
-        $tags_limit_bbcode = array(
-            '*' 	=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url', 'email', 'list', 'img', 'code', 'topic', 'post', 'forum', 'user'),
-            'list' 	=> array('*'),
-            'url' 	=> array('img'),
-            'email' => array('img'),
-            'topic' => array('img'),
-            'post'  => array('img'),
-            'forum' => array('img'),
-            'user'  => array('img'),
-            'img' 	=> array(),
-            'h'		=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url', 'email', 'topic', 'post', 'forum', 'user'),
-        ); */
-    }
-
-    private static function parse_tag(&$tree, &$errors, $context, $depth) {
+    private static function parse_tag(&$tree, &$errors, $context) {
         // consume [
         self::$i++;
 
@@ -449,11 +490,12 @@ class BBCodeParser {
             self::$string_buffer[] = self::$chars[self::$i++];
         }
         $tag = self::get_string_buffer();
+        $lc_tag = strtolower($tag);
 
         // if it's not a valid tag/attribute presence combination,
         // refund before attempting to parse the attribute
         if (self::$i >= self::$limit
-            || !self::is_valid_tag($tag, ($has_attr = self::$chars[self::$i] === '=')))
+            || !self::is_valid_tag($lc_tag, ($has_attr = self::$chars[self::$i] === '=')))
             return self::dump_string($tree, '[' . $tag);
 
         // if the attribute value is invalid, refund
@@ -468,15 +510,23 @@ class BBCodeParser {
         // consume ]
         self::$i++;
 
-        $node = new SyntaxTreeTagNode($tag, $attr, array());
-        $node_depth =
-            (!is_null($context) && strcasecmp($tag, $context) === 0) ? $depth + 1 : 0;
+        self::validate_tag_rules($lc_tag, $errors, $context);
+        if (!empty($errors)) {
+            self::quit_parsing();
+            return;
+        }
 
-        self::parse_text($node->children, $errors, $tag, $node_depth);
-        self::validate_tag_rules($node, $errors, $context, $node_depth);
+        $node = new SyntaxTreeTagNode($lc_tag, $attr, array());
+        $child_context = $context;
+        $child_context[] = $lc_tag;
+        self::parse_text($node->children, $errors, $child_context);
+
+        // TODO: validate values conform to expected regexes
+        if (!empty($errors))
+            return;
+
         self::dump_node($tree, $node);
-
-        // consume close tag (control will not return from `parse_text` unless it's found)
+        // consume close tag
         self::$i += strlen($tag) + 3;
     }
 
@@ -514,10 +564,9 @@ class BBCodeParser {
     }
 
     private static function is_valid_tag(&$tag, $has_attr) {
-        $lc_tag = strtolower($tag);
-        return in_array($lc_tag, self::$all_tags)
-            && (!$has_attr || in_array($lc_tag, self::$attr_permitted))
-            && ($has_attr || !in_array($lc_tag, self::$attr_required));
+        return in_array($tag, self::$all_tags)
+            && (!$has_attr || in_array($tag, self::$attr_permitted))
+            && ($has_attr || !in_array($tag, self::$attr_required));
     }
 
     private static function is_valid_attr(&$tag, &$attr) {
@@ -565,12 +614,15 @@ class BBCodeParser {
 
 // TODO: test script, delete
 $pun_config = ['o_smilies' => '1', 'o_make_links' => '1', 'o_censoring' => '0',
-                'p_message_bbcode' => '1', 'o_base_url' => 'https://blast.thegt.org'];
-$pun_user = ['show_img' => '1', 'show_smilies' => '1'];
-$lang_common = ['wrote' => 'wrote:'];
+                'p_message_bbcode' => '1', 'o_base_url' => 'https://blast.thegt.org',
+                'o_quote_depth' => 3];
+$pun_user = ['show_img' => '1', 'show_smilies' => '1', 'g_post_links' => '1'];
+require('../lang/English/common.php');
 require('./utf8/utf8.php');
 require('./functions.php');
 $errors = [];
 $tree = BBCodeParser::buildSyntaxTree(file_get_contents($argv[1]), $errors);
 echo BBCodeParser::generateHTML($tree);
 echo PHP_EOL;
+foreach ($errors as $error)
+    fwrite(STDERR, $error . PHP_EOL);

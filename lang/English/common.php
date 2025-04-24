@@ -90,6 +90,7 @@ $lang_common = array(
 'BBCode error no closing tag'		=>	'[%1$s] was found without a matching [/%1$s]',
 'BBCode error empty attribute'		=>	'[%s] tag had an empty attribute section',
 'BBCode error tag not allowed'		=>	'You are not allowed to use [%s] tags',
+'BBCode error nesting depth'        =>  'You have nested too many [%1$s] tags, the limit is %2$d',
 'BBCode error tag url not allowed'	=>	'You are not allowed to post links',
 'BBCode list size error'			=>	'Your list was too long to parse, please make it smaller!',
 
