@@ -123,8 +123,9 @@ class BBCodeParser {
             switch ($tag = strtolower($node->tag)) {
                 case 'img':
                     return self::generate_img_tag($node);
+                case 'c':
                 case 'code':
-                    return self::generate_code_tag($node);
+                    return self::generate_code_tag($node, $tag === 'code');
                 case 'url':
                 case 'topic':
                 case 'post':
@@ -160,13 +161,16 @@ class BBCodeParser {
     	return $img_tag;
     }
 
-    private static function generate_code_tag(&$node) {
+    private static function generate_code_tag(&$node, $code_block) {
         $code = pun_htmlspecialchars(pun_trim(self::node_interior_as_text($node), "\n\r"));
 
         $num_lines = substr_count($code, "\n");
-        return '</p><div class="codebox"><pre'
-            . (($num_lines > 28) ? ' class="vscroll"' : '')
-            . '><code>' . $code .'</code></pre></div><p>';
+        if ($code_block)
+            return '</p><div class="codebox"><pre'
+                . (($num_lines > 28) ? ' class="vscroll"' : '')
+                . '><code>' . $code .'</code></pre></div><p>';
+        else
+            return '<code class="code">' . $code . '</code>';
     }
 
     private static function generate_url_tag(&$tag, &$node) {
@@ -210,7 +214,7 @@ class BBCodeParser {
         if ($child instanceof SyntaxTreeTextNode) {
             return array(
                 pun_trim($child->text),
-                $custom_url ? self::generate_text($child) : null);
+                $custom_url ? self::generate_text($child, false) : null);
         } else if (($child instanceof SyntaxTreeTagNode)
                     && strcasecmp($child->tag, 'img') === 0) {
             return array(
@@ -261,8 +265,6 @@ class BBCodeParser {
                 return '<span class="bbu">';
             case 's':
                 return '<span class="bbs">';
-            case 'c':
-                return '<code class="code">';
             case 'del':
                 return '<del>';
             case 'ins':
@@ -305,18 +307,19 @@ class BBCodeParser {
         }
     }
 
-    private static function generate_text(&$node) {
+    private static function generate_text(&$node, $ctx_replace_links = true) {
         global $pun_config, $pun_user;
 
         $text = $node->text;
 
+        // Censoring skips code tags, but maybe that's a good thing
+        // i.e. `public static cl*** BBCodeParser {}`
         if ($pun_config['o_censoring'] === '1')
     		$text = censor_words($text);
 
         $text = pun_htmlspecialchars($node->text);
 
-        // TODO: this should be moved or smth
-        if ($pun_config['o_make_links'] === '1')
+        if ($ctx_replace_links && $pun_config['o_make_links'] === '1')
             $text = self::replace_links($text);
 
         if ($pun_config['o_smilies'] === '1'&& $pun_user['show_smilies'] === '1'
@@ -362,13 +365,13 @@ class BBCodeParser {
     }
 
     private static function replace_links($text) {
-        // TODO: broken; fix.
-        $text = preg_replace_callback(
+        return preg_replace_callback(
             '%(https?://|www\.)([a-z0-9\-]+\.)+([a-z0-9]{2,})(\/[a-z0-9\-\.\/]*(\?[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?(&amp;[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?)*)?(\#[a-z0-9\-_]*)?)?%i',
             function($matches) {
                 $url = strcasecmp(substr($matches[0], 0, 4), 'http') !== 0
                     ? 'https://' . $matches[0] : $matches[0];
-                return '<a href="' . $url . '" rel="nofollow">' . $url . '</a>';
+                return '<a href="' . $url . '" rel="nofollow">'
+                    . self::safe_truncate_url($matches[0]) . '</a>';
             },
             $text);
     }
@@ -390,7 +393,7 @@ class BBCodeParser {
         return substr($text, 1, -1);
     }
 
-    private static function parse_text(&$tree, &$errors, $context = null) {
+    private static function parse_text(&$tree, &$errors, $context = null, $depth = 0) {
         $close_tag = is_null($context) ? null : '[/' . $context . ']';
         // text within [code] should not be touched
         $preformatted_context = !is_null($context) && strcasecmp($context, 'code') === 0;
@@ -400,7 +403,7 @@ class BBCodeParser {
             if ($char === '[' && self::$i + 2 < self::$limit) {
                 if (!$preformatted_context && self::$chars[self::$i + 1] !== '/') {
                     self::dump_string_buffer($tree);
-                    self::parse_tag($tree, $errors, $context);
+                    self::parse_tag($tree, $errors, $context, $depth);
                     continue;
                 } else if (!is_null($context) && self::matches_close_tag($close_tag)) {
                     return self::dump_string_buffer($tree);
@@ -415,7 +418,30 @@ class BBCodeParser {
             $errors[] = 'missing close tag: ' . $close_tag;
     }
 
-    private static function parse_tag(&$tree, &$errors, $context) {
+    private static function validate_tag_rules(&$node, &$errors, $context, $depth) {
+        global $pun_config;
+        // TODO: impl
+        // quotes can be nested up to $pun_config['o_quote_depth']
+        // lists and * can be nested up to 5 times
+        // block tags (quote, code, list, h, *) can only be nested in other block tags
+        // the following may not contain newlines:
+        // array('b', 'i', 'u', 's', 'ins', 'del', 'em', 'color', 'colour', 'h', 'topic', 'post', 'forum', 'user');
+        /* certain tags may only contain:
+        $tags_limit_bbcode = array(
+            '*' 	=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url', 'email', 'list', 'img', 'code', 'topic', 'post', 'forum', 'user'),
+            'list' 	=> array('*'),
+            'url' 	=> array('img'),
+            'email' => array('img'),
+            'topic' => array('img'),
+            'post'  => array('img'),
+            'forum' => array('img'),
+            'user'  => array('img'),
+            'img' 	=> array(),
+            'h'		=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url', 'email', 'topic', 'post', 'forum', 'user'),
+        ); */
+    }
+
+    private static function parse_tag(&$tree, &$errors, $context, $depth) {
         // consume [
         self::$i++;
 
@@ -443,13 +469,15 @@ class BBCodeParser {
         self::$i++;
 
         $node = new SyntaxTreeTagNode($tag, $attr, array());
-        self::parse_text($node->children, $errors, $tag);
+        $node_depth =
+            (!is_null($context) && strcasecmp($tag, $context) === 0) ? $depth + 1 : 0;
+
+        self::parse_text($node->children, $errors, $tag, $node_depth);
+        self::validate_tag_rules($node, $errors, $context, $node_depth);
         self::dump_node($tree, $node);
 
         // consume close tag (control will not return from `parse_text` unless it's found)
         self::$i += strlen($tag) + 3;
-
-        // TODO: validate tag nesting before surrendering control
     }
 
     private static function parse_attr(&$errors) {
@@ -536,7 +564,7 @@ class BBCodeParser {
 }
 
 // TODO: test script, delete
-$pun_config = ['o_smilies' => '1', 'o_make_links' => '0', 'o_censoring' => '0',
+$pun_config = ['o_smilies' => '1', 'o_make_links' => '1', 'o_censoring' => '0',
                 'p_message_bbcode' => '1', 'o_base_url' => 'https://blast.thegt.org'];
 $pun_user = ['show_img' => '1', 'show_smilies' => '1'];
 $lang_common = ['wrote' => 'wrote:'];
