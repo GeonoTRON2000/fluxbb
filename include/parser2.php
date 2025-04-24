@@ -93,12 +93,7 @@ class BBCodeParser {
     public static function buildSyntaxTree($text, &$errors) {
         global $pun_config;
 
-        // TODO: copy `censor_words` impl
-        // TODO: can defeat censoring with empty bbcodes
-        if ($pun_config['o_censoring'] === '1')
-    		self::$chars = censor_words($text);
-        else
-            self::$chars = pun_trim($text);
+        self::$chars = pun_trim($text);
 
         if ($pun_config['p_message_bbcode'] !== '1'
                 || strpos(self::$chars, '[') === false || strpos(self::$chars, ']') === false)
@@ -140,12 +135,9 @@ class BBCodeParser {
                 case 'list':
                     return self::generate_list_tag($node);
                 default:
-                    $inner = self::generate_code($node->children);
-                    if (empty($inner))
-                        return '';
-
                     return self::generate_open_tag($tag, $node->attribute)
-                            . $inner . self::generate_close_tag($tag);
+                            . self::generate_code($node->children) 
+                            . self::generate_close_tag($tag);
             }
         }
     }
@@ -153,13 +145,10 @@ class BBCodeParser {
     private static function generate_img_tag(&$node) {
         global $lang_common, $pun_user;
 
-        $url = self::node_interior_as_text($node);
-        if (empty($url))
-            return '';
-
-        $alt = is_null($node->attribute) ? basename($url) : $node->attribute;
+        $url = pun_trim(self::node_interior_as_text($node));
+        $alt = pun_htmlspecialchars(
+            is_null($node->attribute) ? basename($url) : pun_trim($node->attribute));
         $url = pun_htmlspecialchars($url);
-        $alt = pun_htmlspecialchars($alt);
 
         if (self::$is_signature && $pun_user['show_img_sig'] !== '0')
     		$img_tag = '<img class="sigimage" src="' . $url . '" alt="' . $alt . '" />';
@@ -173,8 +162,6 @@ class BBCodeParser {
 
     private static function generate_code_tag(&$node) {
         $code = pun_htmlspecialchars(pun_trim(self::node_interior_as_text($node), "\n\r"));
-        if (empty($code))
-            return '';
 
         $num_lines = substr_count($code, "\n");
         return '</p><div class="codebox"><pre'
@@ -187,9 +174,6 @@ class BBCodeParser {
         // can either be [url]text[/url] or [url][img]link[/img][/url]
         // note: but not a [user][img]7[/img][/user]
         list($inner_text, $inner) = self::extract_url_interior($node, $custom_url);
-        if (empty($inner_text))
-            // TODO: throw in validations, remove empty generation
-            return '';
 
         $url = $custom_url ? pun_trim($node->attribute) : $inner_text;
         switch ($tag) {
@@ -222,10 +206,6 @@ class BBCodeParser {
     }
 
     private static function extract_url_interior(&$node, $custom_url) {
-        if (empty($node->children))
-            return array('', '');
-        // TODO: if count($tree) > 1 throw
-
         $child = $node->children[0];
         if ($child instanceof SyntaxTreeTextNode) {
             return array(
@@ -237,7 +217,6 @@ class BBCodeParser {
                 pun_trim(self::node_interior_as_text($child)),
                 self::generate_img_tag($child));
         }
-        // TODO: else throw
     }
 
     private static function generate_list_tag(&$node) {
@@ -250,12 +229,8 @@ class BBCodeParser {
             else
                 $item_interior = self::generate_node_code($item);
 
-            if (!empty($item_interior))
-                $items[] = '<li><p>' . $item_interior . '</p></li>';
+            $items[] = '<li><p>' . $item_interior . '</p></li>';
         }
-
-        if (empty($items))
-            return '';
 
         $inner = implode('', $items);
         if ($type === '1')
@@ -333,8 +308,14 @@ class BBCodeParser {
     private static function generate_text(&$node) {
         global $pun_config, $pun_user;
 
+        $text = $node->text;
+
+        if ($pun_config['o_censoring'] === '1')
+    		$text = censor_words($text);
+
         $text = pun_htmlspecialchars($node->text);
 
+        // TODO: this should be moved or smth
         if ($pun_config['o_make_links'] === '1')
             $text = self::replace_links($text);
 
