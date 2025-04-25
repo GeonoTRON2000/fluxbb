@@ -508,8 +508,10 @@ class BBCodeParser {
     private static function validate_tag_content(&$node, &$errors) {
         global $lang_common;
 
-        if (empty($node->children))
-            $errors[] = $lang_common['BBCode error empty tag'];
+        if (empty($node->children)) {
+            $errors[] = sprintf($lang_common['BBCode error empty tag'], $node->tag);
+            return;
+        }
 
         // link tags with the link specified can have literal DOM trees inside,
         // we could care less at this stage (nesting rules will catch shenanigans)
@@ -638,6 +640,10 @@ class BBCodeParser {
         $child_context = $context;
         $child_context[] = $lc_tag;
         self::parse_text($node->children, $errors, $child_context);
+        if (!empty($errors)) {
+            self::$i = self::$limit;
+            return;
+        }
 
         self::validate_tag_content($node, $errors);
         if (!empty($errors)) {
