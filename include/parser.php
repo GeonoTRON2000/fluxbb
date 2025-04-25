@@ -271,10 +271,14 @@ class BBCodeParser {
         $items = array();
 
         foreach ($node->children as $item) {
-            if (($item instanceof SyntaxTreeTagNode) && $item->tag === '*')
-                $item_interior = self::generate_code($item->children);
+            if (($item instanceof SyntaxTreeTextNode)) {
+                $text = pun_trim($item->text);
+                if (strlen($text) < 1)
+                    continue;
+                $item_interior = self::generate_text($text);
+            }
             else
-                $item_interior = self::generate_node_code($item);
+                $item_interior = self::generate_code($item->children);
 
             $items[] = '<li><p>' . $item_interior . '</p></li>';
         }
