@@ -565,7 +565,7 @@ class BBCodeParser {
     private static function validate_color($color) {
         return $color !== false
             && preg_match(
-                '%^[a-zA-Z]{3,20}|\#[0-9a-fA-F]{6}|\#[0-9a-fA-F]{3}$%s', $color);
+                '%^([a-zA-Z]{3,20}|\#[0-9a-fA-F]{6}|\#[0-9a-fA-F]{3})$%s', $color);
     }
 
     private static function parse_text(&$tree, &$errors, $context = array()) {
