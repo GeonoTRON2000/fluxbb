@@ -491,7 +491,7 @@ class BBCodeParser {
         if (!in_array($tag, self::$context_validate_attr))
             return;
 
-        if (empty($attr))
+        if (strlen($attr) < 1)
             $errors[] = sprintf($lang_common['BBCode error empty attribute'], $tag);
         else if ($tag === 'list' && !in_array($attr, array('1', 'a', '*')))
             $errors[] = $lang_common['BBCode error invalid list attribute'];
@@ -709,7 +709,7 @@ class BBCodeParser {
 
     private static function accept_node(&$tree, &$node) {
         if ($node instanceof SyntaxTreeTextNode) {
-            if (empty($node->text))
+            if (strlen($node->text) < 1)
                 return;
 
             if (!empty($tree) && (($last = $tree[count($tree) - 1]) instanceof SyntaxTreeTextNode)) {
