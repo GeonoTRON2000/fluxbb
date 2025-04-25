@@ -60,6 +60,7 @@ class BBCodeParser {
         ':cool:' => 'cool.png');
 
     private static array $nesting_limits;
+    private static $link_pattern = '%(https?://|www\.)([a-z0-9\-]+\.)+([a-z0-9]{2,})(\/[a-z0-9\-\.\/]*(\?[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?(&amp;[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?)*)?(\#[a-z0-9\-_]*)?)?%i';
     private static $block_tags = array('quote', 'code', 'list', 'h', '*');
     private static $link_tags = array('url', 'email', 'topic', 'post', 'forum', 'user');
     private static $id_tags = array('topic', 'post', 'forum', 'user');
@@ -105,22 +106,12 @@ class BBCodeParser {
         return self::format_html(self::generate_text($text));
     }
 
-    private static function format_html($text) {
-        $text = '<p>' . pun_trim($text) . '</p>';
-        // Replace any breaks next to paragraphs so our replace below catches them
-        $text = preg_replace('%(</?p>)(?:\s*?<br />){1,2}%i', '$1', $text);
-        $text = preg_replace('%(?:<br />\s*?){1,2}(</?p>)%i', '$1', $text);
+    public static function validatePermissions(&$tree, &$errors) {
+        global $lang_common, $pun_user;
 
-        // Remove any empty paragraph tags (inserted via quotes/lists/code/etc) which should be stripped
-        $text = str_replace('<p></p>', '', $text);
-
-        $text = preg_replace('%<br />\s*?<br />%i', '</p><p>', $text);
-
-        $text = str_replace('<p><br />', '<br /><p>', $text);
-        $text = str_replace('<br /></p>', '</p><br />', $text);
-        $text = str_replace('<p></p>', '<br /><br />', $text);
-
-        return $text;
+        if ($pun_user['g_post_links'] !== '1'
+                && !self::validate_no_links($tree, $errors))
+            $errors[] = $lang_common['BBCode error tag url not allowed'];
     }
 
     public static function buildSyntaxTree($text, &$errors) {
@@ -140,6 +131,24 @@ class BBCodeParser {
         $tree = array();
         self::parse_text($tree, $errors);
         return empty($errors) ? $tree : array();
+    }
+
+    private static function format_html($text) {
+        $text = '<p>' . pun_trim($text) . '</p>';
+        // Replace any breaks next to paragraphs so our replace below catches them
+        $text = preg_replace('%(</?p>)(?:\s*?<br />){1,2}%i', '$1', $text);
+        $text = preg_replace('%(?:<br />\s*?){1,2}(</?p>)%i', '$1', $text);
+
+        // Remove any empty paragraph tags (inserted via quotes/lists/code/etc) which should be stripped
+        $text = str_replace('<p></p>', '', $text);
+
+        $text = preg_replace('%<br />\s*?<br />%i', '</p><p>', $text);
+
+        $text = str_replace('<p><br />', '<br /><p>', $text);
+        $text = str_replace('<br /></p>', '</p><br />', $text);
+        $text = str_replace('<p></p>', '<br /><br />', $text);
+
+        return $text;
     }
 
     private static function generate_code(&$tree) {
@@ -342,7 +351,7 @@ class BBCodeParser {
     }
 
     private static function generate_text($text, $ctx_replace_links = true) {
-        global $pun_config, $pun_user;
+        global $pun_config;
 
         // Censoring skips code tags, but maybe that's a good thing
         // i.e. `public static cl*** BBCodeParser {}`
@@ -351,10 +360,7 @@ class BBCodeParser {
 
         $text = pun_htmlspecialchars($text);
 
-        if ($ctx_replace_links && $pun_config['o_make_links'] === '1'
-                // TODO: this will be a bug, it needs to be the
-                // poster's group not the viewer's
-                && $pun_user['g_post_links'] === '1')
+        if ($ctx_replace_links && $pun_config['o_make_links'] === '1')
             $text = self::replace_links($text);
 
         if (self::$show_smilies)
@@ -400,7 +406,7 @@ class BBCodeParser {
 
     private static function replace_links($text) {
         return preg_replace_callback(
-            '%(https?://|www\.)([a-z0-9\-]+\.)+([a-z0-9]{2,})(\/[a-z0-9\-\.\/]*(\?[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?(&amp;[a-z0-9\-_\.]+(=[a-z0-9\-_\.]*)?)*)?(\#[a-z0-9\-_]*)?)?%i',
+            self::$link_pattern,
             function($matches) {
                 $url = strcasecmp(substr($matches[0], 0, 4), 'http') !== 0
                     ? 'https://' . $matches[0] : $matches[0];
@@ -427,11 +433,30 @@ class BBCodeParser {
         return substr($text, 1, -1);
     }
 
+    private static function validate_no_links(&$tree) {
+        foreach ($tree as $node) {
+            if ($node instanceof SyntaxTreeTextNode)
+            {
+                if (self::text_has_links($node->text))
+                    return false;
+            }
+            else if ($node->tag === 'url')
+                return false;
+            else if (!self::validate_no_links($node->children))
+                return false;
+        }
+        return true;
+    }
+
+    private static function text_has_links($text) {
+        return preg_match(self::$link_pattern, $text) !== false;
+    }
+
     // true = pass validations and render
     // false = pass validations but do not render this tag
     // append to $errors = fail validations
     private static function validate_tag_rules(&$tag, &$errors, &$context) {
-        global $pun_user, $lang_common;
+        global $lang_common;
         $depth = array_count_values($context);
         $parent = empty($context) ? null : $context[count($context) - 1];
 
@@ -444,8 +469,6 @@ class BBCodeParser {
                 $lang_common['BBCode error nesting depth'],
                 $tag,
                 self::$nesting_limits[$tag]);
-        else if ($pun_user['g_post_links'] !== '1' && $tag === 'url')
-            $errors[] = $lang_common['BBCode error tag url not allowed'];
         else if ($parent = self::invalid_tag_nesting($tag, $context))
             $errors[] = sprintf(
                 $lang_common['BBCode error invalid nesting'], $tag, $parent);
@@ -711,7 +734,8 @@ class BBCodeParser {
 
 // exports
 function validate_bbcode($text, &$errors) {
-    BBCodeParser::buildSyntaxTree($text, $errors);
+    $tree = BBCodeParser::buildSyntaxTree($text, $errors);
+    BBCodeParser::validatePermissions($tree, $errors);
 }
 
 function parse_message($text, $hide_smilies) {
