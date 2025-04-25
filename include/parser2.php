@@ -7,9 +7,8 @@
  */
 
  // Make sure no one attempts to run this script "directly"
-// TODO: re-enable
-//if (!defined('PUN'))
-//    exit;
+if (!defined('PUN'))
+   exit;
 
 class SyntaxTreeNode {}
 class SyntaxTreeTextNode extends SyntaxTreeNode {
@@ -62,6 +61,8 @@ class BBCodeParser {
 
     private static array $nesting_limits;
     private static $block_tags = array('quote', 'code', 'list', 'h', '*');
+    private static $link_tags = array('url', 'email', 'topic', 'post', 'forum', 'user');
+    private static $id_tags = array('topic', 'post', 'forum', 'user');
     private static $context_limit_bbcode = array(
         '*' 	=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url',
                             'email', 'list', 'img', 'code', 'topic', 'post', 'forum', 'user'),
@@ -75,6 +76,10 @@ class BBCodeParser {
         'img' 	=> array(),
         'h'		=> array('b', 'i', 'u', 's', 'c', 'ins', 'del', 'em', 'color', 'colour', 'url',
                             'email', 'topic', 'post', 'forum', 'user'));
+    private static $context_validate_interior = 
+        array('img', 'url', 'email', 'topic', 'post', 'forum', 'user', 'code');
+    private static $context_validate_attr =
+        array('url', 'email', 'topic', 'post', 'forum', 'user', 'color', 'colour', 'list');
 
     private static int $i;
     private static int $limit;
@@ -451,6 +456,89 @@ class BBCodeParser {
         return false;
     }
 
+    private static function validate_tag_attr(&$tag, &$attr, &$errors) {
+        global $lang_common;
+        if (!in_array($tag, self::$context_validate_attr))
+            return;
+
+        if (empty($attr))
+            $errors[] = sprintf($lang_common['BBCode error empty attribute'], $tag);
+        else if ($tag === 'list' && !in_array($attr, array('1', 'a', '*')))
+            $errors[] = $lang_common['BBCode error invalid list attribute'];
+        else if ($tag === 'email' && !self::validate_email($attr))
+            $errors[] = sprintf($lang_common['BBCode error invalid attribute'], $tag);
+        else if ($tag === 'url' && !self::validate_url($attr))
+            $errors[] = sprintf($lang_common['BBCode error invalid attribute'], $tag);
+        else if (($tag === 'color' || $tag === 'colour') && !self::validate_color($attr))
+            $errors[] = sprintf($lang_common['BBCode error invalid attribute'], $tag);
+        else if (in_array($tag, self::$id_tags) && intval($attr) < 1)
+            $errors[] = sprintf($lang_common['BBCode error invalid attribute'], $tag);
+    }
+
+    private static function validate_tag_content(&$node, &$errors) {
+        global $lang_common;
+
+        if (empty($node->children))
+            $errors[] = $lang_common['BBCode error empty tag'];
+
+        // link tags with the link specified can have literal DOM trees inside,
+        // we could care less at this stage (nesting rules will catch shenanigans)
+        if (!in_array($node->tag, self::$context_validate_interior)
+                || (!is_null($node->attribute) && in_array($node->tag, self::$link_tags)))
+            return;
+
+        $child = $node->children[0];
+        if (count($node->children) > 1)
+            $errors[] = sprintf(
+                $lang_common['BBCode error unwanted bbcode'], $node->tag);
+        else if (($node->tag === 'c' || $node->tag === 'code')
+                    && !self::text_for_validation($child))
+            // can only show up if we screw up somehow but throwing is better than XSS
+            $errors[] = sprintf(
+                $lang_common['BBCode error unwanted bbcode'], $node->tag);
+        else if ($node->tag === 'img'
+                    && !self::validate_url(self::text_for_validation($child)))
+            $errors[] = $lang_common['BBCode error invalid img'];
+        else if ($node->tag === 'url'
+                    && !self::validate_url(self::text_for_validation($child))
+                    && !self::validate_is_img($child))
+            $errors[] = $lang_common['BBCode error invalid url'];
+        else if ($node->tag === 'email'
+                    && !self::validate_email(self::text_for_validation($child)))
+            $errors[] = $lang_common['BBCode error invalid email'];
+        else if (in_array($node->tag, self::$id_tags)
+                    && intval(self::text_for_validation($child)) < 1)
+            $errors[] = sprintf($lang_common['BBCode error invalid id'], $node->tag);
+    }
+
+    private static function text_for_validation(&$node) {
+        if ($node instanceof SyntaxTreeTextNode)
+            return $node->text;
+
+        return false;
+    }
+
+    private static function validate_is_img(&$node) {
+        return ($node instanceof SyntaxTreeTagNode) && $node->tag === 'img';
+    }
+
+    private static function validate_email($email) {
+        // FluxBB doesn't even validate this much
+        echo 'validating email: ' . $email . PHP_EOL;
+        return $email !== false && filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+    }
+
+    private static function validate_url($url) {
+        // this is literally more than FluxBB does...
+        return $url !== false && preg_match('%^[^\[\]\(\)]+$%s', $url) !== false;
+    }
+
+    private static function validate_color($color) {
+        return $color !== false
+            && preg_match(
+                '%^[a-zA-Z]{3,20}|\#[0-9a-fA-F]{6}|\#[0-9a-fA-F]{3}$%s', $color) !== false;
+    }
+
     private static function parse_text(&$tree, &$errors, $context = array()) {
         global $lang_common;
 
@@ -465,17 +553,17 @@ class BBCodeParser {
             $char = self::$chars[self::$i];
             if ($char === '[' && self::$i + 2 < self::$limit) {
                 if (!$preformatted_context && self::$chars[self::$i + 1] !== '/') {
-                    self::dump_string_buffer($tree);
+                    self::accept_string_buffer($tree);
                     self::parse_tag($tree, $errors, $context);
                     continue;
                 } else if (!empty($context) && self::matches_close_tag($close_tag)) {
-                    return self::dump_string_buffer($tree);
+                    return self::accept_string_buffer($tree);
                 }
             }
             self::$string_buffer[] = $char;
             self::$i++;
         }
-        self::dump_string_buffer($tree);
+        self::accept_string_buffer($tree);
 
         if (!empty($context) && empty($errors))
             $errors[] =
@@ -496,38 +584,41 @@ class BBCodeParser {
         // refund before attempting to parse the attribute
         if (self::$i >= self::$limit
             || !self::is_valid_tag($lc_tag, ($has_attr = self::$chars[self::$i] === '=')))
-            return self::dump_string($tree, '[' . $tag);
+            return self::accept_string($tree, '[' . $tag);
 
-        // if the attribute value is invalid, refund
         $attr = $has_attr ? self::parse_attr($errors) : null;
-        if ($has_attr && !self::is_valid_attr($tag, $attr))
-            return self::dump_string($tree, '[' . $tag . '=' . $attr);
 
         // must find ] or else it's not actually a tag
         if (self::$i >= self::$limit || self::$chars[self::$i] !== ']')
-            return self::dump_string($tree, '[' . $tag . ($has_attr ? '=' . $attr : ''));
+            return self::accept_string($tree, '[' . $tag . ($has_attr ? '=' . $attr : ''));
 
-        // consume ]
-        self::$i++;
-
+        // validate attribute format and tag nesting
+        if ($has_attr)
+            self::validate_tag_attr($lc_tag, $attr, $errors);
         self::validate_tag_rules($lc_tag, $errors, $context);
+
         if (!empty($errors)) {
-            self::quit_parsing();
+            self::$i = self::$limit;
             return;
         }
+
+        // passed validations, it's a tag--consume ]
+        self::$i++;
 
         $node = new SyntaxTreeTagNode($lc_tag, $attr, array());
         $child_context = $context;
         $child_context[] = $lc_tag;
         self::parse_text($node->children, $errors, $child_context);
 
-        // TODO: validate values conform to expected regexes
-        if (!empty($errors))
+        self::validate_tag_content($node, $errors);
+        if (!empty($errors)) {
+            self::$i = self::$limit;
             return;
+        }
 
-        self::dump_node($tree, $node);
-        // consume close tag
+        // passed all validations, it's valid--consume close tag and add to tree
         self::$i += strlen($tag) + 3;
+        self::accept_node($tree, $node);
     }
 
     private static function parse_attr(&$errors) {
@@ -581,7 +672,7 @@ class BBCodeParser {
         return $string;        
     }
 
-    private static function dump_node(&$tree, &$node) {
+    private static function accept_node(&$tree, &$node) {
         if ($node instanceof SyntaxTreeTextNode) {
             if (empty($node->text))
                 return;
@@ -598,16 +689,16 @@ class BBCodeParser {
         $tree[] = $node;
     }
 
-    private static function dump_string(&$tree, $string) {
+    private static function accept_string(&$tree, $string) {
         $node = new SyntaxTreeTextNode($string);
-        self::dump_node($tree, $node);
+        self::accept_node($tree, $node);
     }
 
-    private static function dump_string_buffer(&$tree) {
+    private static function accept_string_buffer(&$tree) {
         if (!empty(self::$string_buffer)) {
             $string = implode('', self::$string_buffer);
             self::$string_buffer = array();
-            self::dump_string($tree, $string);
+            self::accept_string($tree, $string);
         }
     }
 }
