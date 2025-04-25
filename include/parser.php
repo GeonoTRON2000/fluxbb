@@ -456,9 +456,6 @@ class BBCodeParser {
         return !preg_match(self::$link_pattern, $text);
     }
 
-    // true = pass validations and render
-    // false = pass validations but do not render this tag
-    // append to $errors = fail validations
     private static function validate_tag_rules(&$tag, &$errors, &$context) {
         global $lang_common;
         $depth = array_count_values($context);
@@ -473,17 +470,18 @@ class BBCodeParser {
                 $lang_common['BBCode error nesting depth'],
                 $tag,
                 self::$nesting_limits[$tag]);
-        else if ($parent = self::invalid_tag_nesting($tag, $context))
+        else if (!is_null($parent) && isset(self::$context_limit_bbcode[$parent])
+                    && !in_array($tag, self::$context_limit_bbcode[$parent]))
             $errors[] = sprintf(
-                $lang_common['BBCode error invalid nesting'], $tag, $parent);
+                $lang_common['BBCode error invalid nesting'], $tag, $parent);                
+        else if ($invalid = self::invalid_tag_nesting($tag, $context))
+            $errors[] = sprintf(
+                $lang_common['BBCode error invalid nesting'], $tag, $invalid);
     }
 
     private static function invalid_tag_nesting(&$tag, &$context) {
         $block_tag = in_array($tag, self::$block_tags);
         foreach ($context as $parent_tag) {
-            if (isset(self::$context_limit_bbcode[$parent_tag])
-                    && !in_array($tag, self::$context_limit_bbcode[$parent_tag]))
-                return $parent_tag;
             if ($block_tag && !in_array($parent_tag, self::$block_tags))
                 return $parent_tag;
         }
