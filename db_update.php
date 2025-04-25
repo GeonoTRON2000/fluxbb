@@ -1699,7 +1699,7 @@ foreach ($errors[$id] as $cur_error)
 		while ($cur_item = $db->fetch_assoc($result))
 		{
 			echo sprintf($lang_update['Preparsing item'], $lang_update['post'], $cur_item['id']).'<br />'."\n";
-			$db->query('UPDATE '.$db->prefix.'posts SET message = \''.$db->escape(preparse_bbcode($cur_item['message'], $temp)).'\' WHERE id = '.$cur_item['id']) or error('Unable to update post', __FILE__, __LINE__, $db->error());
+			$db->query('UPDATE '.$db->prefix.'posts SET message = \''.$db->escape($cur_item['message'], $temp).'\' WHERE id = '.$cur_item['id']) or error('Unable to update post', __FILE__, __LINE__, $db->error());
 
 			$end_at = $cur_item['id'];
 		}
@@ -1734,7 +1734,7 @@ foreach ($errors[$id] as $cur_error)
 		while ($cur_item = $db->fetch_assoc($result))
 		{
 			echo sprintf($lang_update['Preparsing item'], $lang_update['signature'], $cur_item['id']).'<br />'."\n";
-			$db->query('UPDATE '.$db->prefix.'users SET signature = \''.$db->escape(preparse_bbcode($cur_item['signature'], $temp, true)).'\' WHERE id = '.$cur_item['id']) or error('Unable to update user', __FILE__, __LINE__, $db->error());
+			$db->query('UPDATE '.$db->prefix.'users SET signature = \''.$db->escape($cur_item['signature']).'\' WHERE id = '.$cur_item['id']) or error('Unable to update user', __FILE__, __LINE__, $db->error());
 
 			$end_at = $cur_item['id'];
 		}

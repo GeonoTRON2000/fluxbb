@@ -146,7 +146,7 @@ if (isset($_POST['form_sent']))
 	if ($pun_config['p_message_bbcode'] == '1')
 	{
 		require PUN_ROOT.'include/parser.php';
-		$message = preparse_bbcode($message, $errors);
+		validate_bbcode($message, $errors);
 	}
 
 	if (empty($errors))
