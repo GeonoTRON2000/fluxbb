@@ -437,7 +437,7 @@ class BBCodeParser {
         foreach ($tree as $node) {
             if ($node instanceof SyntaxTreeTextNode)
             {
-                if (self::text_has_links($node->text))
+                if (!self::text_no_links($node->text))
                     return false;
             }
             else if ($node->tag === 'url')
@@ -448,8 +448,8 @@ class BBCodeParser {
         return true;
     }
 
-    private static function text_has_links($text) {
-        return preg_match(self::$link_pattern, $text) !== false;
+    private static function text_no_links($text) {
+        return !preg_match(self::$link_pattern, $text);
     }
 
     // true = pass validations and render
@@ -559,13 +559,13 @@ class BBCodeParser {
 
     private static function validate_url($url) {
         // this is literally more than FluxBB does...
-        return $url !== false && preg_match('%^[^\[\]\(\)]+$%s', $url) !== false;
+        return $url !== false && preg_match('%^[^\[\]\(\)]+$%s', $url);
     }
 
     private static function validate_color($color) {
         return $color !== false
             && preg_match(
-                '%^[a-zA-Z]{3,20}|\#[0-9a-fA-F]{6}|\#[0-9a-fA-F]{3}$%s', $color) !== false;
+                '%^[a-zA-Z]{3,20}|\#[0-9a-fA-F]{6}|\#[0-9a-fA-F]{3}$%s', $color);
     }
 
     private static function parse_text(&$tree, &$errors, $context = array()) {
