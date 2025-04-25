@@ -892,7 +892,7 @@ else if (isset($_POST['form_sent']))
 
 					$errors = array();
 
-					$form['signature'] = preparse_bbcode($form['signature'], $errors, true);
+					validate_bbcode($form['signature'], $errors);
 
 					if(count($errors) > 0)
 						message('<ul><li>'.implode('</li><li>', $errors).'</li></ul>');

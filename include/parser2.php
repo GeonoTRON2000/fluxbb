@@ -87,14 +87,26 @@ class BBCodeParser {
     private static string $chars;
     private static array $string_buffer;
     private static bool $is_signature;
-    private static bool $hide_smilies;
+    private static bool $show_smilies;
 
     public static function generateHTML(
-        &$tree, $is_signature = false, $hide_smilies = false) {
+        &$tree, $is_signature = false, $show_smilies = true) {
         self::$is_signature = $is_signature;
-        self::$hide_smilies = $hide_smilies;
+        self::$show_smilies = $show_smilies;
 
-        $text = '<p>' . pun_trim(self::generate_code($tree)) . '</p>';
+        return self::format_html(self::generate_code($tree));
+    }
+
+    public static function generateFallback(
+        $text, $is_signature = false, $show_smilies = true) {
+        self::$is_signature = $is_signature;
+        self::$show_smilies = $show_smilies;
+
+        return self::format_html(self::generate_text($text));
+    }
+
+    private static function format_html($text) {
+        $text = '<p>' . pun_trim($text) . '</p>';
         // Replace any breaks next to paragraphs so our replace below catches them
         $text = preg_replace('%(</?p>)(?:\s*?<br />){1,2}%i', '$1', $text);
         $text = preg_replace('%(?:<br />\s*?){1,2}(</?p>)%i', '$1', $text);
@@ -114,16 +126,12 @@ class BBCodeParser {
     public static function buildSyntaxTree($text, &$errors) {
         global $pun_config;
 
-        self::$chars = pun_trim($text);
-
-        if ($pun_config['p_message_bbcode'] !== '1'
-                || strpos(self::$chars, '[') === false || strpos(self::$chars, ']') === false)
-            return array(new SyntaxTreeTextNode(self::$chars));
-
         self::$nesting_limits = array(
             'quote' => $pun_config['o_quote_depth'],
             'list' => 5,
             '*' => 5);
+
+        self::$chars = pun_trim($text);
 
         self::$i = 0;
         self::$limit = strlen(self::$chars);
@@ -144,7 +152,7 @@ class BBCodeParser {
 
     private static function generate_node_code(&$node) {
         if ($node instanceof SyntaxTreeTextNode) {
-            return self::generate_text($node);
+            return self::generate_text($node->text);
         } else if ($node instanceof SyntaxTreeTagNode) {
             switch ($tag = $node->tag) {
                 case 'img':
@@ -240,7 +248,7 @@ class BBCodeParser {
         if ($child instanceof SyntaxTreeTextNode) {
             return array(
                 pun_trim($child->text),
-                $custom_url ? self::generate_text($child, false) : null);
+                $custom_url ? self::generate_text($child->text, false) : null);
         } else if (($child instanceof SyntaxTreeTagNode)
                     && strcasecmp($child->tag, 'img') === 0) {
             return array(
@@ -333,24 +341,23 @@ class BBCodeParser {
         }
     }
 
-    private static function generate_text(&$node, $ctx_replace_links = true) {
+    private static function generate_text($text, $ctx_replace_links = true) {
         global $pun_config, $pun_user;
-
-        $text = $node->text;
 
         // Censoring skips code tags, but maybe that's a good thing
         // i.e. `public static cl*** BBCodeParser {}`
         if ($pun_config['o_censoring'] === '1')
     		$text = censor_words($text);
 
-        $text = pun_htmlspecialchars($node->text);
+        $text = pun_htmlspecialchars($text);
 
         if ($ctx_replace_links && $pun_config['o_make_links'] === '1'
+                // TODO: this will be a bug, it needs to be the
+                // poster's group not the viewer's
                 && $pun_user['g_post_links'] === '1')
             $text = self::replace_links($text);
 
-        if ($pun_config['o_smilies'] === '1'&& $pun_user['show_smilies'] === '1'
-                && !self::$hide_smilies)
+        if (self::$show_smilies)
     		$text = self::replace_smilies($text);
 
     	// Deal with newlines, tabs and multiple spaces
@@ -524,7 +531,6 @@ class BBCodeParser {
 
     private static function validate_email($email) {
         // FluxBB doesn't even validate this much
-        echo 'validating email: ' . $email . PHP_EOL;
         return $email !== false && filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
     }
 
@@ -703,17 +709,44 @@ class BBCodeParser {
     }
 }
 
-// TODO: test script, delete
-$pun_config = ['o_smilies' => '1', 'o_make_links' => '1', 'o_censoring' => '0',
-                'p_message_bbcode' => '1', 'o_base_url' => 'https://blast.thegt.org',
-                'o_quote_depth' => 3];
-$pun_user = ['show_img' => '1', 'show_smilies' => '1', 'g_post_links' => '1'];
-require('../lang/English/common.php');
-require('./utf8/utf8.php');
-require('./functions.php');
-$errors = [];
-$tree = BBCodeParser::buildSyntaxTree(file_get_contents($argv[1]), $errors);
-echo BBCodeParser::generateHTML($tree);
-echo PHP_EOL;
-foreach ($errors as $error)
-    fwrite(STDERR, $error . PHP_EOL);
+// exports
+function validate_bbcode($text, &$errors) {
+    BBCodeParser::buildSyntaxTree($text, $errors);
+}
+
+function parse_message($text, $hide_smilies) {
+    global $pun_config, $pun_user;
+
+    $bbcode = $pun_config['p_message_bbcode'] === '1'
+                && strpos($text, '[') !== false && strpos($text, ']') !== false;
+    $smilies = $pun_config['o_smilies'] === '1'
+                && $pun_user['show_smilies'] === '1' && $hide_smilies !== '1';
+
+    if ($bbcode) {
+        $errors = array();
+        $tree = BBCodeParser::buildSyntaxTree($text, $errors);
+        
+        if (empty($errors))
+            return BBCodeParser::generateHTML($tree, false, $smilies);
+    }
+
+    return BBCodeParser::generateFallback($text, false, $smilies);
+}
+
+function parse_signature($text) {
+    global $pun_config, $pun_user;
+
+    $bbcode = $pun_config['p_sig_bbcode'] === '1'
+                && strpos($text, '[') !== false && strpos($text, ']') !== false;
+    $smilies = $pun_config['o_smilies_sig'] === '1' && $pun_user['show_smilies'] === '1';
+
+    if ($bbcode) {
+        $errors = array();
+        $tree = BBCodeParser::buildSyntaxTree($text, $errors);
+        
+        if (empty($errors))
+            return BBCodeParser::generateHTML($tree, true, $smilies);
+    }
+
+    return BBCodeParser::generateFallback($text, true, $smilies);
+}
