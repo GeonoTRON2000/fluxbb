@@ -20,9 +20,9 @@ of the other forums have whilst not sacrificing essential functionality or usabi
 
 ## Links
 
-* Homepage: https://fluxbb.org
-* Documentation: https://fluxbb.org/docs/v1.5
-* Community: https://fluxbb.org/forums/
-* Resources: https://fluxbb.org/resources/
-* IRC: irc://irc.freenode.net/fluxbb
-* Development: https://github.com/fluxbb/fluxbb
+* Homepage: RIP
+* Documentation: RIP
+* Community: RIP
+* Resources: RIP
+* IRC: irc://irc.libera.chat:6697/fluxbb (not official)
+* Development: https://github.com/GeonoTRON2000/fluxbb
